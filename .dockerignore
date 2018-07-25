@@ -1,0 +1,7 @@
+frontend
+bin
+.vscode
+__pycache__
+images
+lib
+uploads

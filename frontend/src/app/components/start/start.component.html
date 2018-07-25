@@ -1,0 +1,17 @@
+<div fxLayout='column' fxLayoutGap="20px" fxLayoutAlign="start center">
+  <h1>Welcome to PID Analyzer</h1>
+  <p>To get started choose a log file (.BBL) to upload and analyze.</p>
+
+  <input
+  style="display: none"
+  type="file" (change)="onFileChanged($event)"
+  #fileInput>
+  <div fxLayout='row' fxLayoutGap="20px">
+    <button mat-raised-button color="primary" (click)="fileInput.click()">Select File</button>
+    <button mat-raised-button color="primary" (click)="onUpload()" [disabled]="!file">Upload!</button>
+  </div>
+  <div>
+    Filename: <span *ngIf="file">{{file.name}}</span>
+  </div>
+  <mat-progress-bar mode="determinate" [value]="percentDone" class="pro-bar"></mat-progress-bar>
+</div>

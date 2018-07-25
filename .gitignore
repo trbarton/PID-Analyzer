@@ -1,0 +1,7 @@
+bin
+__pycache__
+frontend/node_modules
+.vscode
+lib
+include
+uploads/*

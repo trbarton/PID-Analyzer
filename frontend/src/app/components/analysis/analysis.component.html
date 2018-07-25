@@ -1,0 +1,16 @@
+<div fxLayout="column" fxLayoutGap="20px" class="analysis-container">
+  <div  *ngIf="!plot1" fxLayout="column" fxLayoutGap="20px" fxLayoutAlign="center center" class="loading-page">
+    <mat-spinner></mat-spinner>
+    <h3>Generating Graphs</h3>
+    <p>{{loadingMessage}}</p>
+  </div>
+
+  <mat-tab-group *ngIf="plot1 || plot2">
+    <mat-tab label="PID Plot" *ngIf="plot1">
+      <img [src]="plot1" width="100%">
+    </mat-tab>
+    <mat-tab label="Noise Plot" *ngIf="plot2">
+      <img [src]="plot2" width="100%">
+    </mat-tab>
+  </mat-tab-group>
+</div>

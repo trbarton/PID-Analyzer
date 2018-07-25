@@ -6,6 +6,8 @@ import subprocess
 import time
 import numpy as np
 from pandas import read_csv
+import matplotlib
+matplotlib.use('Agg')
 from  matplotlib import rcParams
 import matplotlib.pyplot as plt
 from scipy.interpolate import interp1d
@@ -14,6 +16,7 @@ from scipy.ndimage.filters import gaussian_filter1d
 import matplotlib.colors as colors
 from scipy.optimize import minimize, basinhopping
 from six.moves import input as sinput
+from pubsub import pub as publisher
 
 
 # ----------------------------------------------------------------------------------
@@ -23,10 +26,18 @@ from six.moves import input as sinput
 # this stuff is worth it, you can buy me a beer in return. Florian Melsheimer
 # ----------------------------------------------------------------------------------
 
-
+plots = []
+clients = []
 Version = 'PID-Analyzer 0.52'
 
 LOG_MIN_BYTES = 500000
+
+def broadcastMessage(message):
+  messageObj = {
+      'message_type': 'update',
+      'message': message
+    }
+  publisher.sendMessage('rootTopic', arg1=messageObj)
 
 class Trace:
     framelen = 1.           # length of each single frame over which to compute response
@@ -354,6 +365,7 @@ class CSV_log:
         self.data = self.readcsv(self.file)
 
         logging.info('Processing:')
+        broadcastMessage('Processing:')
         self.traces = self.find_traces(self.data)
         self.roll, self.pitch, self.yaw = self.__analyze()
         self.fig_resp = self.plot_all_resp([self.roll, self.pitch, self.yaw])
@@ -367,14 +379,14 @@ class CSV_log:
                 if np.sum(np.abs((ll-np.abs(ll))))==0:
                     return True
         else:
-            logging.info('noise_bounds is no valid list')
+            broadcastMessage('noise_bounds is no valid list')
             return False
 
     def plot_all_noise(self, traces, lims): #style='fancy' gives 2d hist for response
         textsize = 7
         rcParams.update({'font.size': 9})
 
-        logging.info('Making noise plot...')
+        broadcastMessage('Making noise plot...')
         fig = plt.figure('Noise plot: Log number: ' + self.headdict['logNum']+'          '+self.file , figsize=(16, 8))
         ### gridspec devides window into 25 horizontal, 31 vertical fields
         gs1 = GridSpec(25, 3 * 10+2, wspace=0.6, hspace=0.7, left=0.04, right=1., bottom=0.05, top=0.97)
@@ -561,7 +573,8 @@ class CSV_log:
         ax5l.text(0, 0, filt_settings_l, ha='left', fontsize=textsize)
         ax5r.text(0, 0, filt_settings_r, ha='left', fontsize=textsize)
 
-        logging.info('Saving as image...')
+        broadcastMessage('Saving noise plot...')
+        plots.append(self.file[:-13] + self.name + '_' + str(self.headdict['logNum'])+'_noise.png')
         plt.savefig(self.file[:-13] + self.name + '_' + str(self.headdict['logNum'])+'_noise.png')
         return fig
 
@@ -570,7 +583,7 @@ class CSV_log:
         textsize = 7
         titelsize = 10
         rcParams.update({'font.size': 9})
-        logging.info('Making PID plot...')
+        broadcastMessage('Making PID plot...')
         fig = plt.figure('Response plot: Log number: ' + self.headdict['logNum']+'          '+self.file , figsize=(16, 8))
         ### gridspec devides window into 24 horizontal, 3*10 vertical fields
         gs1 = GridSpec(24, 3 * 10, wspace=0.6, hspace=0.7, left=0.04, right=1., bottom=0.05, top=0.97)
@@ -661,19 +674,20 @@ class CSV_log:
 
         plt.text(0, 0, t, ha='left', va='center', rotation=90, color='grey', alpha=0.5, fontsize=textsize)
         ax4.axis('off')
-        logging.info('Saving as image...')
+        broadcastMessage('Saving response plot...')
+        plots.append(self.file[:-13] + self.name + '_' + str(self.headdict['logNum'])+'_response.png')
         plt.savefig(self.file[:-13] + self.name + '_' + str(self.headdict['logNum'])+'_response.png')
         return fig
 
     def __analyze(self):
         analyzed = []
         for t in self.traces:
-            logging.info(t['name'] + '...   ')
+            broadcastMessage(t['name'] + '...   ')
             analyzed.append(Trace(t))
         return analyzed
 
     def readcsv(self, fpath):
-        logging.info('Reading: Log '+str(self.headdict['logNum']))
+        broadcastMessage('Reading: Log '+str(self.headdict['logNum']))
         datdic = {}
         ### keycheck for 'usecols' only reads usefull traces, uncommend if needed
         wanted =  ['time (us)',
@@ -937,7 +951,7 @@ class BB_log:
 
 def run_analysis(log_file_path, plot_name, blackbox_decode, show, noise_bounds):
     test = BB_log(log_file_path, plot_name, blackbox_decode, show, noise_bounds)
-    logging.info('Analysis complete, showing plot. (Close plot to exit.)')
+    broadcastMessage('Analysis complete, showing plot. (Close plot to exit.)')
 
 
 def strip_quotes(filepath):
@@ -948,87 +962,101 @@ def strip_quotes(filepath):
 def clean_path(path):
     return os.path.abspath(os.path.expanduser(strip_quotes(path)))
 
+def run_default(logfile):
+  noise = [[1.0, 10.1], [1.0, 100.0], [1.0, 100.0], [0.0, 4.0]]
+  run_analysis(logfile, 'plot', './blackbox-tools/obj/blackbox_decode', 'N', noise)
+  return plots
 
-if __name__ == "__main__":
-    logging.basicConfig(
-        format='%(levelname)s %(asctime)s %(filename)s:%(lineno)s: %(message)s',
-        level=logging.INFO)
+def runThenMessageOnCompletion(logfile, cl):
+  clients = cl
+  logfile = os.getcwd() + '/uploads/' + logfile
+  plots = run_default(logfile)
+  broadcastMessage('Graphing finished')
+  return plots
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        '-l', '--log', action='append',
-        help='BBL log file(s) to analyse. Omit for interactive prompt.')
-    parser.add_argument('-n', '--name', default='tmp', help='Plot name.')
-    parser.add_argument(
-        '--blackbox_decode',
-        default=os.path.join(os.getcwd(), 'Blackbox_decode.exe'),
-        help='Path to Blackbox_decode.exe.')
-    parser.add_argument('-s', '--show', default='Y', help='Y = show plot window when done.\nN = Do not. \nDefault = Y')
-    parser.add_argument('-nb', '--noise_bounds', default='[[1.,10.1],[1.,100.],[1.,100.],[0.,4.]]', help='bounds of plots in noise analysis. use "auto" for autoscaling. \n default=[[1.,10.1],[1.,100.],[1.,100.],[0.,4.]]')
-    args = parser.parse_args()
+# if __name__ == "__main__":
+#     logging.basicConfig(
+#         format='%(levelname)s %(asctime)s %(filename)s:%(lineno)s: %(message)s',
+#         level=logging.INFO)
 
-    blackbox_decode_path = clean_path(args.blackbox_decode)
-    try:
-        args.noise_bounds = eval(args.noise_bounds)
+#     parser = argparse.ArgumentParser()
+#     parser.add_argument(
+#         '-l', '--log', action='append',
+#         help='BBL log file(s) to analyse. Omit for interactive prompt.')
+#     parser.add_argument('-n', '--name', default='tmp', help='Plot name.')
+#     parser.add_argument(
+#         '--blackbox_decode',
+#         default=os.path.join(os.getcwd(), 'Blackbox_decode.exe'),
+#         help='Path to Blackbox_decode.exe.')
+#     parser.add_argument('-s', '--show', default='Y', help='Y = show plot window when done.\nN = Do not. \nDefault = Y')
+#     parser.add_argument('-nb', '--noise_bounds', default='[[1.,10.1],[1.,100.],[1.,100.],[0.,4.]]', help='bounds of plots in noise analysis. use "auto" for autoscaling. \n default=[[1.,10.1],[1.,100.],[1.,100.],[0.,4.]]')
+#     args = parser.parse_args()
 
-    except:
-        args.noise_bounds = args.noise_bounds
-    if not os.path.isfile(blackbox_decode_path):
-        parser.error(
-            ('Could not find Blackbox_decode.exe (used to generate CSVs from '
-             'your BBL file) at %s. You may need to install it from '
-             'https://github.com/cleanflight/blackbox-tools/releases.')
-            % blackbox_decode_path)
-    logging.info('Decoding with %r' % blackbox_decode_path)
+#     blackbox_decode_path = clean_path(args.blackbox_decode)
+#     try:
+#         args.noise_bounds = eval(args.noise_bounds)
 
-    logging.info(Version)
-    logging.info('Hello Pilot!')
+#     except:
+#         args.noise_bounds = args.noise_bounds
+#     if not os.path.isfile(blackbox_decode_path):
+#         parser.error(
+#             ('Could not find Blackbox_decode.exe (used to generate CSVs from '
+#              'your BBL file) at %s. You may need to install it from '
+#              'https://github.com/cleanflight/blackbox-tools/releases.')
+#             % blackbox_decode_path)
+#     logging.info('Decoding with %r' % blackbox_decode_path)
 
-    if args.log:
-        for log_path in args.log:
-            run_analysis(clean_path(log_path), args.name, args.blackbox_decode, args.show, args.noise_bounds)
-        if args.show.upper() == 'Y':
-            plt.show()
-        else:
-            plt.cla()
-            plt.clf()
+#     logging.info(Version)
+#     logging.info('Hello Pilot!')
+
+#     if args.log:
+#         for log_path in args.log:
+#             print(clean_path(log_path), args.name, args.blackbox_decode, args.show, args.noise_bounds)
+#             run_analysis(clean_path(log_path), args.name, args.blackbox_decode, args.show, args.noise_bounds)
+#         if args.show.upper() == 'Y':
+#             # plt.show()
+#             print()
+#         else:
+#             plt.cla()
+#             plt.clf()
 
 
-    else:
-        while True:
-            logging.info('Interactive mode: Enter log file, or type close when done.')
+#     else:
+#         while True:
+#             logging.info('Interactive mode: Enter log file, or type close when done.')
 
-            try:
-                time.sleep(0.1)
-                raw_path = sinput('Blackbox log file path (type or drop here): ')
+#             try:
+#                 time.sleep(0.1)
+#                 raw_path = sinput('Blackbox log file path (type or drop here): ')
 
-                if raw_path == 'close':
-                    logging.info('Goodbye!')
-                    break
+#                 if raw_path == 'close':
+#                     logging.info('Goodbye!')
+#                     break
 
-                raw_paths = strip_quotes(raw_path).replace("''", '""').split('""')  # seperate multiple paths
-                name = sinput('Optional plot name:') or args.name
-                showplt = sinput('Show plot window when done? [Y]/N') or args.show
-                noise_bounds = sinput('Bounds on noise plot: [default/last] | copy and edit | "auto"\nCurrent: '+str(args.noise_bounds)+'\n') or args.noise_bounds
+#                 raw_paths = strip_quotes(raw_path).replace("''", '""').split('""')  # seperate multiple paths
+#                 name = sinput('Optional plot name:') or args.name
+#                 showplt = sinput('Show plot window when done? [Y]/N') or args.show
+#                 noise_bounds = sinput('Bounds on noise plot: [default/last] | copy and edit | "auto"\nCurrent: '+str(args.noise_bounds)+'\n') or args.noise_bounds
 
-                args.show = showplt.upper()
-                try:
-                    args.noise_bounds=eval(noise_bounds)
+#                 args.show = showplt.upper()
+#                 try:
+#                     args.noise_bounds=eval(noise_bounds)
 
-                except:
-                    args.noise_bounds = noise_bounds
+#                 except:
+#                     args.noise_bounds = noise_bounds
 
-            except (EOFError, KeyboardInterrupt):
-                logging.info('Goodbye!')
-                break
+#             except (EOFError, KeyboardInterrupt):
+#                 logging.info('Goodbye!')
+#                 break
 
-            for p in raw_paths:
-                if os.path.isfile(clean_path(p)):
-                    run_analysis(clean_path(p), name, args.blackbox_decode, args.show, args.noise_bounds)
-                else:
-                    logging.info('No valid input path!')
-            if args.show == 'Y':
-                plt.show()
-            else:
-                plt.cla()
-                plt.clf()
+#             for p in raw_paths:
+#                 if os.path.isfile(clean_path(p)):
+#                     run_analysis(clean_path(p), name, args.blackbox_decode, args.show, args.noise_bounds)
+#                 else:
+#                     logging.info('No valid input path!')
+#             if args.show == 'Y':
+#                 # plt.show()
+#                 print()
+#             else:
+#                 plt.cla()
+#                 plt.clf()
